@@ -1,15 +1,14 @@
-export module yawarakai:util;
+#feature on edition_2023
+#pragma once
 
-import std;
-
-export namespace yawarakai {
+namespace yawarakai {
 
 template <typename TFunction>
 struct ScopeGuard {
     TFunction _func;
     bool _canceled = false;
 
-    ScopeGuard(TFunction&& f) : _func{ std::forward<TFunction>(f) } {}
+    ScopeGuard(forward auto f) : _func{ forward f } {}
     ~ScopeGuard() {
         if (!_canceled) {
             _func();

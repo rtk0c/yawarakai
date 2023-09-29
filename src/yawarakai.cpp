@@ -1,7 +1,10 @@
-// TODO this file should be of module `yawarakai:lisp`, but if we do that, nothing from the :lisp interface unit is available here -- xmake bug?
-module yawarakai;
+#feature on edition_2023
 
-import std;
+#include "lisp.hpp"
+#include "util.hpp"
+
+#include <charconv>
+#include <limits>
 
 using namespace std::literals;
 
@@ -25,28 +28,25 @@ ConsCell& Heap::lookup(MemoryLocation addr) {
 
 Sexp cons(Sexp a, Sexp b, Heap& heap) {
     auto addr = heap.push(ConsCell{ std::move(a), std::move(b) });
-    Sexp res;
-    res.set(addr);
-    return res;
+    return .Ref(addr);
 }
 
 void cons_inplace(Sexp a, Sexp& list, Heap& heap) {
     auto addr = heap.push(ConsCell{ std::move(a), std::move(list) });
-    list = Sexp();
-    list.set(addr);
+    list = Sexp::Ref(addr);
 }
 
 bool is_list(const ConsCell& cons) {
-    auto type = cons.cdr.get_type();
-    return type == Sexp::TYPE_NIL || type == Sexp::TYPE_REF;
+    auto type = cons.cdr.active;
+    return type== Sexp::Nil || type== Sexp::Ref;
 }
 
-std::vector<Sexp> parse_sexp(std::string_view src, Heap& heap) {
+std::vector!<Sexp> parse_sexp(std::string_view src, Heap& heap) {
     struct ParserStackFrame {
-        std::vector<Sexp> children;
+        std::vector!<Sexp> children;
         const Sexp* wrapper = nullptr;
     };
-    std::vector<ParserStackFrame> cs;
+    std::vector!<ParserStackFrame> cs;
 
     cs.push_back(ParserStackFrame());
 
@@ -152,8 +152,10 @@ std::vector<Sexp> parse_sexp(std::string_view src, Heap& heap) {
                         case 'n': str.push_back('\n');
                         case '\\': str.push_back('\\');
                         default: {
-                            throw std::format("Invalid escaped char '{}'", esc);
-                        } break;
+//                            auto msg = std::format("Invalid escaped char '{}'", esc);
+//                            throw msg;
+                            throw "Invalid escaped char";
+                        }
                     }
 
                     i += 2;
@@ -164,10 +166,7 @@ std::vector<Sexp> parse_sexp(std::string_view src, Heap& heap) {
                 i += 1;
             }
 
-            Sexp sexp;
-            sexp.set(std::move(str));
-
-            push_sexp_to_parent(std::move(sexp));
+            push_sexp_to_parent(.String(std::move(str)));
 
             continue;
         }
@@ -176,12 +175,9 @@ std::vector<Sexp> parse_sexp(std::string_view src, Heap& heap) {
             double v;
             auto [rest, ec] = std::from_chars(&src[cursor], &*src.end(), v);
             if (ec == std::errc()) {
-                Sexp sexp;
-                sexp.set(v);
+                push_sexp_to_parent(.Number(v));
 
-                push_sexp_to_parent(std::move(sexp));
-
-                cursor += rest - &src[cursor];
+                cursor += static_cast<size_t>(rest - &src[cursor]);
                 continue;
             } else if (ec == std::errc::result_out_of_range) {
                 throw "Error: number literal out of range"s;
@@ -209,10 +205,7 @@ std::vector<Sexp> parse_sexp(std::string_view src, Heap& heap) {
             if (std::isspace(next_c))
                 cursor += 1;
 
-            Sexp sexp;
-            sexp.set(Symbol(std::string(&src[symbol_begin], symbol_size)));
-
-            push_sexp_to_parent(std::move(sexp));
+            push_sexp_to_parent(.Symbol(std::string(&src[symbol_begin], symbol_size)));
         }
     }
 
@@ -221,17 +214,13 @@ std::vector<Sexp> parse_sexp(std::string_view src, Heap& heap) {
 }
 
 void dump_sexp_impl(std::string& output, const Sexp& sexp, const Heap& heap) {
-    switch (sexp.get_type()) {
-        using enum Sexp::Type;
-
-        case TYPE_NIL: {
+    match (sexp) {
+        .Nil => {
             output += "()";
-        } break;
+        }
 
-        case TYPE_NUM: {
-            auto v = sexp.as<double>();
-
-            constexpr auto BUF_SIZE = std::numeric_limits<double>::max_digits10;
+        .Number(auto v) => {
+            constexpr auto BUF_SIZE = std::numeric_limits!<double>::max_digits10;
             char buf[BUF_SIZE];
             auto res = std::to_chars(buf, buf + BUF_SIZE, v);
             
@@ -240,23 +229,19 @@ void dump_sexp_impl(std::string& output, const Sexp& sexp, const Heap& heap) {
             } else {
                 throw "Error formatting number.";
             }
-        } break;
+        }
 
-        case TYPE_STRING: {
-            auto& v = sexp.as<std::string>();
-
+        .String(auto v) => {
             output += '"';
             output += v;
             output += '"';
-        } break;
+        }
 
-        case TYPE_SYMBOL: {
-            auto& v = sexp.as<Symbol>();
+        .Symbol(auto v) => {
+            output += v;
+        }
 
-            output += v.name;
-        } break;
-
-        case TYPE_REF: {
+        .Ref(_) => {
             output += "(";
             traverse_list(sexp, heap, [&](const Sexp& elm) {
                 dump_sexp_impl(output, elm, heap);
@@ -264,8 +249,8 @@ void dump_sexp_impl(std::string& output, const Sexp& sexp, const Heap& heap) {
             });
             output.pop_back(); // Remove the trailing space
             output += ")";
-        } break;
-    }
+        }
+    };
 }
 
 std::string dump_sexp(const Sexp& sexp, const Heap& heap) {

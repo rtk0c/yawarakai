@@ -1,5 +1,12 @@
-import std;
-import yawarakai;
+#feature on edition_2023
+
+#include "util.hpp"
+#include "lisp.hpp"
+
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
 
 namespace fs = std::filesystem;
 using namespace std::literals;
